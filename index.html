@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OBS Polls Overlay (Splicer_IRL) — опросы канала</title>
 
     <!--
@@ -289,6 +290,19 @@
             z-index: 10;
         }
         #err.show { display: block; }
+
+        /* телефон/узкое окно: карточка сжимается до ширины экрана */
+        @media (max-width: 760px) {
+            :root {
+                --card-width: calc(100vw - 12px);
+                --card-radius: 12px;
+                --font-size: 15px;
+            }
+            #title { font-size: 19px; }
+            .choice { min-width: 120px; }
+            .choice .c-name { font-size: 15px; }
+            .choice .c-pts { font-size: 12.5px; }
+        }
     </style>
 </head>
 <body>
