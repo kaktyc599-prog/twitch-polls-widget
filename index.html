@@ -48,6 +48,9 @@
             --accent: #b96bff;
             --green: #00ff9d;
             --purple: #b96bff;
+            --pink: #ff5fb8;
+            --yellow: #ffd24a;
+            --aqua: #4de8e8;
             --text: #ffffff;
             --text-dim: #9aa3b2;
         }
@@ -216,22 +219,26 @@
             color: #eaf8ff;
         }
 
-        /* неон: чётные варианты — зелёные, нечётные — фиолетовые */
-        .choice.g0 .c-name i { background: var(--green); box-shadow: 0 0 8px var(--green), 0 0 15px var(--green); }
-        .choice.g1 .c-name i { background: var(--purple); box-shadow: 0 0 8px var(--purple), 0 0 15px var(--purple); }
+        /* Неон-окраска вариантов: цвет назначается случайно на каждый новый
+           опрос (палитра: зелёный, фиолетовый, розовый, жёлтый, аквамарин).
+           --c хранит RGB-триплет, из него собираются все свечения. */
+        .choice.c0 { --c: 0, 255, 157; }      /* зелёный */
+        .choice.c1 { --c: 185, 107, 255; }    /* фиолетовый */
+        .choice.c2 { --c: 255, 95, 184; }     /* розовый */
+        .choice.c3 { --c: 255, 210, 74; }     /* жёлтый */
+        .choice.c4 { --c: 77, 232, 232; }     /* аквамариновый */
 
-        .choice.g0 {
-            border-top-color: var(--green);
-            background: linear-gradient(180deg, rgba(0, 255, 157, 0.10), rgba(0, 255, 157, 0.02) 70%);
-            box-shadow: 0 0 16px -4px rgba(0, 255, 157, 0.45), inset 0 0 18px rgba(0, 255, 157, 0.05);
-        }
-        .choice.g1 {
-            border-top-color: var(--purple);
-            background: linear-gradient(180deg, rgba(185, 107, 255, 0.12), rgba(185, 107, 255, 0.02) 70%);
-            box-shadow: 0 0 16px -4px rgba(185, 107, 255, 0.45), inset 0 0 18px rgba(185, 107, 255, 0.06);
+        .choice.c0, .choice.c1, .choice.c2, .choice.c3, .choice.c4 {
+            border-top-color: rgb(var(--c));
+            background: linear-gradient(180deg, rgba(var(--c), 0.12), rgba(var(--c), 0.02) 70%);
+            box-shadow: 0 0 16px -4px rgba(var(--c), 0.45), inset 0 0 18px rgba(var(--c), 0.05);
         }
 
-        /* мини-полоса процентов внутри кнопки-варианта */
+        .choice .c-name i {
+            background: rgb(var(--c));
+            box-shadow: 0 0 8px rgb(var(--c)), 0 0 15px rgb(var(--c));
+        }
+
         .choice .c-bar {
             height: 5px;
             border-radius: 999px;
@@ -241,18 +248,11 @@
         }
 
         .choice .c-bar i {
-            display: block;
-            height: 100%;
-            width: 0;
-            border-radius: 999px;
-            transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+            background: linear-gradient(90deg, rgba(var(--c), 0.55), rgb(var(--c)));
+            box-shadow: 0 0 10px rgba(var(--c), 0.65);
         }
 
-        .choice.g0 .c-bar i { background: linear-gradient(90deg, #007a52, var(--green)); box-shadow: 0 0 10px rgba(0, 255, 157, 0.65); }
-        .choice.g1 .c-bar i { background: linear-gradient(90deg, #7a3ad6, var(--purple)); box-shadow: 0 0 10px rgba(185, 107, 255, 0.65); }
-
-        .choice.winner { animation: winPop 0.5s ease; }
-        .choice.winner.g0, .choice.winner.g1 { transform: scale(1.02); }
+        .choice.winner { animation: winPop 0.5s ease; transform: scale(1.02); }
         .choice.loser { opacity: 0.38; filter: saturate(0.4); transform: scale(0.985); box-shadow: none; }
 
         @keyframes winPop {
@@ -360,13 +360,51 @@
         }
         function hideErr() { errBox.classList.remove('show'); }
 
-        function showBanner(text, cls = '', ms = 0) {
+        function showBanner(text, cls = '', ms = 0, rgb = null) {
             banner.className = '';
             banner.textContent = text;
+            // сбрасываем кастомный цвет от предыдущей победы
+            banner.style.color = '';
+            banner.style.textShadow = '';
             banner.classList.add('show');
             String(cls).split(/\s+/).filter(Boolean).forEach(c => banner.classList.add(c));
+            // если передан цвет победителя — красим баннер под него
+            if (rgb) {
+                banner.style.color = 'rgb(' + rgb + ')';
+                banner.style.textShadow = '0 0 16px rgba(' + rgb + ', 0.75), 0 0 30px rgba(' + rgb + ', 0.4)';
+            }
             if (ms > 0) setTimeout(() => { if (banner.textContent === text) banner.classList.remove('show'); }, ms);
         }
+
+        /* ============================================================
+           Палитра неон-цветов: 5 вариантов, распределение на каждый
+           новый опрос СЛУЧАЙНОЕ и стабильное в рамках опроса;
+           после завершения (когда появляется новый опрос) — пересыпается.
+           ============================================================ */
+        const PALETTE = [
+            { cls: 'c0', rgb: '0, 255, 157' },      /* зелёный */
+            { cls: 'c1', rgb: '185, 107, 255' },    /* фиолетовый */
+            { cls: 'c2', rgb: '255, 95, 184' },     /* розовый */
+            { cls: 'c3', rgb: '255, 210, 74' },     /* жёлтый */
+            { cls: 'c4', rgb: '77, 232, 232' },     /* аквамариновый */
+        ];
+        let colorOrder = [0, 1, 2, 3, 4];
+        let colorPollId = null;
+
+        function rollColors(pollId) {
+            // новый опрос — новая случайная раскладка цветов по местам
+            if (pollId === colorPollId) return;
+            colorPollId = pollId;
+            colorOrder = PALETTE.map((_, i) => i);
+            for (let i = colorOrder.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                const tmp = colorOrder[i];
+                colorOrder[i] = colorOrder[j];
+                colorOrder[j] = tmp;
+            }
+        }
+
+        const colorClsRemoval = 'c0 c1 c2 c3 c4';
 
         /* ============================================================
            Форматирование
@@ -444,13 +482,17 @@
                 choicesBox.appendChild(node);
                 choiceEls.set(c.id, node);
             }
-            node.classList.remove('g0', 'g1', 'winner', 'loser');
-            node.classList.add(idx % 2 === 0 ? 'g0' : 'g1');   // чередование цветов
+            node.classList.remove('winner', 'loser', ...colorClsRemoval.split(' '));
+            // случайный цвет этой позиции в текущем опросе (стабильный до конца опроса)
+            const ci = colorOrder[idx % PALETTE.length];
+            node.classList.add(PALETTE[ci].cls);
+            node.__ci = ci;
             node.querySelector('.c-name span').textContent = c.title || 'Вариант';
             return node;
         }
 
         function renderPoll(p) {
+            rollColors(p.id);            // новый опрос -> новый случайный набор цветов
             title.textContent = p.title || 'Опрос';
 
             const choices = p.choices || [];
@@ -510,8 +552,14 @@
                     });
                     if (winIdx.length > 0) {
                         const w = winIdx[0];
-                        const cls = w % 2 === 0 ? 'win win-green' : 'win win-purple';
-                        showBanner('Победа: ' + (choices[w].title || 'Вариант') + ' — ' + fmtNum(counts[w]) + ' голосов' + (winIdx.length > 1 ? ' (ничья)' : ''), cls);
+                        const winNode = choiceEls.get(choices[w].id);
+                        const winRgb = winNode ? PALETTE[winNode.__ci].rgb : null;
+                        showBanner(
+                            'Победа: ' + (choices[w].title || 'Вариант') + ' — ' + fmtNum(counts[w]) + ' голосов' + (winIdx.length > 1 ? ' (ничья)' : ''),
+                            'win',
+                            0,
+                            winRgb
+                        );
                         scheduleHide();
                     }
                 } else if (status === 'TERMINATED') {
