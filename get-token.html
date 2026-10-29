@@ -2,7 +2,7 @@
 <html lang="_ru">
 <head>
     <meta charset="UTF-8">
-    <title>Получение токена — OBS Bets Overlay (Splicer_IRL)</title>
+    <title>Получение токена — OBS Polls Overlay (Splicer_IRL)</title>
     <style>
         body {
             background: #17181d;
@@ -69,24 +69,24 @@
     </style>
 </head>
 <body>
-    <h1>Настройка виджета ставок</h1>
+    <h1>Настройка виджетов опросов</h1>
     <p>Тебе нужно получить <b>access_токен Twitch</b> и вставить его в конец URL виджета для OBS. Вся настройка делается один раз.</p>
 
     <h2>Шаг 1 · Зарегистрируй приложение Twitch</h2>
     <ol>
         <li>Открой <a href="https://dev.twitch.tv/console/apps" target="_blank">dev.twitch.tv/console/apps</a> и войди под своим каналом (Splicer_IRL).</li>
         <li>«Register Your Application»: название любое (например «OBS Bets»), категория Chat Bot.</li>
-        <li>В поле <b>OAuth Redirect URLs</b> впиши ровно: <code id="redirectUrl">https://kaktyc599-prog.github.io/twitch-polls-widget/get-token.html</code></li>
+        <li>В поле <b>OAuth Redirect URLs</b> впиши обе ссылки (Twitch разрешает до 10):
+            <br><code id="redirectUrl">https://kaktyc599-prog.github.io/twitch-polls-widget/get-token.html</code>
+            <br><code>https://kaktyc599-prog.github.io/twitch-bets-widget/get-token.html</code></li>
         <li>Нажми Create. Открой приложение и скопируй <b>Client ID</b>.</li>
     </ol>
 
     <h2>Шаг 2 · Вставь Client ID и получи токен</h2>
     <input id="clientId" placeholder="Client ID (например gp76...)">
     <button id="authBtn">Открыть окно авторизации Twitch</button>
-    <p style="margin-top:8px">Нажми кнопку, войди под <b>аккаунтом стримера</b> и разреши доступ. Ты попадёшь на страницу-ошибку localhost — это <b>нормально</b>!</p>
-    <ul>
-        <li>Скопируй из адресной строки браузера значение после <code>access_token=</code> (до знака <code>&amp;</code>) — это и есть токен.</li>
-    </ul>
+    <p style="margin-top:8px">Нажми кнопку, войди под <b>аккаунтом стримера</b> и разреши доступ.
+    Twitch вернёт тебя обратно на эту же страницу — токен подловится <b>автоматически</b> и появится в поле ниже.</p>
 
     <h2>Шаг 3 · Склей URL для OBS</h2>
     <input id="tokenIn" placeholder="Вставь сюда access_token из шага 2">
@@ -104,7 +104,7 @@
     <h2>Если что-то не работает</h2>
     <ul>
         <li><b>401 Unauthorized</b> — токен недействителен: пересоздай его здесь.</li>
-        <li><b>403</b> — токен не от аккаунта стримера или нет галочки «predictions» на шаге 2.</li>
+        <li><b>403</b> — токен не от аккаунта стримера или ты не разрешил доступ к обоим пунктам (ставки + опросы).</li>
         <li>Ошибки сети в OBS — проверь стену/антивирус, нужен доступ к api.twitch.tv.</li>
     </ul>
 
@@ -154,8 +154,8 @@
             if (!token) { alert('Сначала вставь access_token из шага 2'); return; }
             if (!cid) { alert('Сначала вставь Client ID'); return; }
 
-            // полный URL к index.html рядом с get-token.html
-            const widgetUrl = new URL('index.html', location.href); // file://.../stavki/index.html
+            // полный URL к index.html рядом с get-token.html (этот репозиторий — опросы)
+            const widgetUrl = new URL('index.html', location.href);
             widgetUrl.search = '?token=' + encodeURIComponent(token) + '&client_id=' + encodeURIComponent(cid);
             // OBS сам сохранит данные и будет грузить короткий URL
             const urlStr = widgetUrl.href.replace(location.hash, '');
