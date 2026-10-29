@@ -390,18 +390,34 @@
         ];
         let colorOrder = [0, 1, 2, 3, 4];
         let colorPollId = null;
+        let usedColors = [];           // цвета, задействованные в прошлом опросе
 
-        function rollColors(pollId) {
-            // новый опрос — новая случайная раскладка цветов по местам
+        function shuffleArr(a) {
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                const t = a[i];
+                a[i] = a[j];
+                a[j] = t;
+            }
+            return a;
+        }
+
+        function rollColors(pollId, count) {
+            // новый опрос — новая раскладка цветов: в приоритете те,
+            // которых не было в предыдущем опросе; при равенстве — случайно
             if (pollId === colorPollId) return;
             colorPollId = pollId;
-            colorOrder = PALETTE.map((_, i) => i);
-            for (let i = colorOrder.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                const tmp = colorOrder[i];
-                colorOrder[i] = colorOrder[j];
-                colorOrder[j] = tmp;
+
+            const fresh = [], used = [];
+            for (let i = 0; i < PALETTE.length; i++) {
+                (usedColors.includes(i) ? used : fresh).push(i);
             }
+            shuffleArr(fresh);
+            shuffleArr(used);
+            colorOrder = fresh.concat(used).slice(0, Math.max(1, count || PALETTE.length));
+
+            // эти цвета теперь "использованы" — в следующем опросе будут в партии Б
+            usedColors = colorOrder.slice();
         }
 
         const colorClsRemoval = 'c0 c1 c2 c3 c4';
@@ -492,7 +508,7 @@
         }
 
         function renderPoll(p) {
-            rollColors(p.id);            // новый опрос -> новый случайный набор цветов
+            rollColors(p.id, (p.choices || []).length);   // новый опрос -> свежие цвета
             title.textContent = p.title || 'Опрос';
 
             const choices = p.choices || [];
