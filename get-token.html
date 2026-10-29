@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="_ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Получение токена — OBS Bets Overlay (Splicer_IRL)</title>
+    <style>
+        body {
+            background: #17181d;
+            color: #eee;
+            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+            max-width: 780px;
+            margin: 0 auto;
+            padding: 34px 20px 60px;
+            line-height: 1.55;
+        }
+        h1 { font-size: 26px; color: #9147ff; margin-bottom: 4px; }
+        h2 { font-size: 18px; margin: 26px 0 8px; color: #fff; }
+        p, li { color: #c9cdd4; font-size: 15px; }
+        ol li, ul li { margin-bottom: 6px; }
+        code {
+            background: #26272e;
+            border: 1px solid #3a3b44;
+            border-radius: 6px;
+            padding: 2px 6px;
+            font-size: 13.5px;
+            color: #ffd166;
+            word-break: break-all;
+        }
+        a { color: #9147ff; }
+        input, button {
+            font-family: inherit;
+            font-size: 15px;
+            border-radius: 8px;
+        }
+        input {
+            width: 100%;
+            padding: 10px 12px;
+            background: #22242b;
+            border: 1px solid #3a3b44;
+            color: #fff;
+            margin: 6px 0 12px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #9147ff;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button:hover { background: #a567ff; }
+        button.copy { background: #2a6fff; }
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            background: #22242b;
+            border: 1px solid #3a3b44;
+            color: #7dff9b;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 14px;
+            font-family: Consolas, monospace;
+            min-height: 84px;
+        }
+        #result { margin-top: 18px; display: none; }
+        #result.show { display: block; }
+        .ok { color: #7dff9b; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <h1>Настройка виджета ставок</h1>
+    <p>Тебе нужно получить <b>access_токен Twitch</b> и вставить его в конец URL виджета для OBS. Вся настройка делается один раз.</p>
+
+    <h2>Шаг 1 · Зарегистрируй приложение Twitch</h2>
+    <ol>
+        <li>Открой <a href="https://dev.twitch.tv/console/apps" target="_blank">dev.twitch.tv/console/apps</a> и войди под своим каналом (Splicer_IRL).</li>
+        <li>«Register Your Application»: название любое (например «OBS Bets»), категория Chat Bot.</li>
+        <li>В поле <b>OAuth Redirect URLs</b> впиши ровно: <code id="redirectUrl">https://kaktyc599-prog.github.io/twitch-polls-widget/get-token.html</code></li>
+        <li>Нажми Create. Открой приложение и скопируй <b>Client ID</b>.</li>
+    </ol>
+
+    <h2>Шаг 2 · Вставь Client ID и получи токен</h2>
+    <input id="clientId" placeholder="Client ID (например gp76...)">
+    <button id="authBtn">Открыть окно авторизации Twitch</button>
+    <p style="margin-top:8px">Нажми кнопку, войди под <b>аккаунтом стримера</b> и разреши доступ. Ты попадёшь на страницу-ошибку localhost — это <b>нормально</b>!</p>
+    <ul>
+        <li>Скопируй из адресной строки браузера значение после <code>access_token=</code> (до знака <code>&amp;</code>) — это и есть токен.</li>
+    </ul>
+
+    <h2>Шаг 3 · Склей URL для OBS</h2>
+    <input id="tokenIn" placeholder="Вставь сюда access_token из шага 2">
+    <p id="autoNotice" style="display:none" class="ok">✓ Токен пойман автоматически — просто нажми «Собрать готовый URL виджета».</p>
+    <button id="makeBtn" class="copy">Собрать готовый URL виджета</button>
+
+    <div id="result">
+        <p class="ok" id="status"></p>
+        <p>Скопируй ссылку ниже и используй её в OBS как источник «Браузер» (можно и просто файл index.html + вписать токен в URL):</p>
+        <textarea id="outUrl" readonly></textarea>
+        <button id="copyBtn">📋 Копировать ссылку</button>
+        <p>Ширину/высоту задай в OBS (рекомендуется 900×280). Настройка масштаба и цвета — внутри index.html.</p>
+    </div>
+
+    <h2>Если что-то не работает</h2>
+    <ul>
+        <li><b>401 Unauthorized</b> — токен недействителен: пересоздай его здесь.</li>
+        <li><b>403</b> — токен не от аккаунта стримера или нет галочки «predictions» на шаге 2.</li>
+        <li>Ошибки сети в OBS — проверь стену/антивирус, нужен доступ к api.twitch.tv.</li>
+    </ul>
+
+    <script>
+        // адрес этой страницы на GitHub Pages — совпадает с OAuth Redirect URL в Twitch dev
+        const REDIRECT_URL = 'https://kaktyc599-prog.github.io/twitch-polls-widget/get-token.html';
+
+        // восстанавливаем прошлые значения, чтобы не вводить дважды
+        const cid = document.getElementById('clientId').value = localStorage.getItem('bets_client_id') || '';
+        const authBtn = document.getElementById('authBtn');
+
+        authBtn.addEventListener('click', () => {
+            const cid = document.getElementById('clientId').value.trim();
+            if (!cid) { alert('Сначала вставь Client ID'); return; }
+            localStorage.setItem('bets_client_id', cid);
+            // redirect -> GitHub Pages версия этой страницы (если открыта локальный файл, всё равно уводим на Pages)
+            const redirect = REDIRECT_URL;
+            // оба скоупа: ставки (stavki) + опросы (opros) — один токен на оба виджета
+            const scope = 'channel:read:predictions channel:read:polls';
+            const url = 'https://id.twitch.tv/oauth2/authorize'
+                + '?client_id=' + encodeURIComponent(cid)
+                + '&redirect_uri=' + encodeURIComponent(redirect)
+                + '&response_type=token'
+                + '&scope=' + encodeURIComponent(scope);
+            // токен не хранится в state, поэтому просто локальная метка
+            const state = Math.random().toString(36).slice(2);
+            localStorage.setItem('bets_oauth_state', state);
+            window.open(url + '&state=' + state, '_blank');
+        });
+
+        // Автоприём токена: Twitch возвращает access_token в #fragment сюда
+        (function captureHashToken() {
+            const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+            const at = h.get('access_token');
+            if (!at) return;
+            document.getElementById('tokenIn').value = at;
+            const notice = document.getElementById('autoNotice');
+            notice.style.display = 'block';
+            document.getElementById('tokenIn').focus();
+            // чистим URL, чтобы токен не осталось в истории
+            try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+        })();
+
+        document.getElementById('makeBtn').addEventListener('click', () => {
+            const cid = document.getElementById('clientId').value.trim();
+            const token = document.getElementById('tokenIn').value.trim();
+            if (!token) { alert('Сначала вставь access_token из шага 2'); return; }
+            if (!cid) { alert('Сначала вставь Client ID'); return; }
+
+            // полный URL к index.html рядом с get-token.html
+            const widgetUrl = new URL('index.html', location.href); // file://.../stavki/index.html
+            widgetUrl.search = '?token=' + encodeURIComponent(token) + '&client_id=' + encodeURIComponent(cid);
+            // OBS сам сохранит данные и будет грузить короткий URL
+            const urlStr = widgetUrl.href.replace(location.hash, '');
+            const out = document.getElementById('outUrl');
+            out.value = urlStr;
+            document.getElementById('result').classList.add('show');
+            document.getElementById('status').textContent = '✓ Готово! Данные также сохранены в браузере виджета.';
+        });
+
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const out = document.getElementById('outUrl');
+            out.select();
+            navigator.clipboard.writeText(out.value).then(() => {
+                document.getElementById('copyBtn').textContent = '✓ Скопировано!';
+                setTimeout(() => document.getElementById('copyBtn').textContent = '📋 Копировать ссылку', 1500);
+            });
+        });
+    </script>
+</body>
+</html>

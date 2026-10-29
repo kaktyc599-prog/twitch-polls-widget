@@ -1,0 +1,4 @@
+# Локальные файлы (не публиковать на GitHub)
+preview.html
+test.html
+*.local.*

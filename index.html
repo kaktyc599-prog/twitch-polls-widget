@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>OBS Polls Overlay (Splicer_IRL) — опросы канала</title>
+
+    <!--
+        ================================================================
+        ВИДЖЕТ ОПРОСОВ ДЛЯ OBS (Splicer_IRL)
+        ================================================================
+        Показывает активный опрос канала: сверху вопрос, под ним
+        варианты-кнопки с количеством голосов. Максимум 3 варианта
+        в строке, остальные переносятся ниже и центрируются:
+
+            ┌──────────────────────────────────────┐
+            │ ● ОПРОС                осталось 2:31 │
+            │ Что заказываем на стриме?            │
+            │  [Вариант 1] [Вариант 2] [Вариант 3] │
+            │      [Вариант 4]      [Вариант 5]    │
+            │   123 (34%)   45 (12%)    ...        │
+            └──────────────────────────────────────┘
+
+        Токен используется ОБЩИЙ с виджетом ставок (stavki) —
+        сохранённые значения читаются из того же хранилища OBS-браузера
+        (bets_token / bets_client_id / bets_broadcaster_...).
+        Scope токена должен включать channel:read:polls — получи токен
+        заново через stavki/get-token.html (там уже оба скоупа),
+        если старый давал только predictions.
+
+        ПАРАМЕТРЫ (те же, что у виджета ставок):
+           ?token=ТОКЕН&client_id=ID   — как обычно
+           &channel=Splicer_IRL        — канал
+           &scale=1                    — масштаб
+           &after=60                   — сек показа результата (0 = не скрывать)
+           &idle=show                  — показывать пустую карточку без опроса
+           &poll=3                     — период опроса API, сек
+           &demo=1                     — демо без токена (5 вариантов: 3+2 в ряд)
+        ================================================================
+    -->
+
+    <style>
+        /* те же неон-переменные, что у виджета ставок */
+        :root {
+            --card-bg: rgba(7, 10, 9, 0.78);
+            --card-radius: 16px;
+            --card-width: 720px;
+            --font-size: 20px;
+            --accent: #b96bff;
+            --green: #00ff9d;
+            --purple: #b96bff;
+            --text: #ffffff;
+            --text-dim: #9aa3b2;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; }
+
+        body {
+            background: transparent;
+            color: var(--text);
+            font-family: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-size: var(--font-size);
+            overflow: hidden;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        #card {
+            width: var(--card-width);
+            background: var(--card-bg);
+            backdrop-filter: blur(8px);
+            border-radius: var(--card-radius);
+            box-shadow:
+                0 10px 34px rgba(0, 0, 0, 0.55),
+                0 0 26px rgba(0, 255, 157, 0.07),
+                0 0 44px rgba(185, 107, 255, 0.10);
+            padding: 16px 20px 18px;
+            border: 1px solid rgba(160, 255, 210, 0.14);
+            transition: opacity 0.45s ease, transform 0.45s ease;
+            opacity: 0;
+            transform: translateY(-12px);
+        }
+
+        #card.visible { opacity: 1; transform: translateY(0); }
+        #card.hidden  { opacity: 0; transform: translateY(-12px); pointer-events: none; }
+
+        #head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+
+        #badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: #d2a8ff;
+            background: rgba(185, 107, 255, 0.16);
+            border: 1px solid rgba(185, 107, 255, 0.45);
+            box-shadow: 0 0 14px rgba(185, 107, 255, 0.30), inset 0 0 10px rgba(185, 107, 255, 0.10);
+            padding: 4px 12px;
+            border-radius: 999px;
+        }
+
+        #badge::before {
+            content: '';
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--purple);
+            box-shadow: 0 0 9px var(--purple), 0 0 16px var(--purple);
+            animation: pulse 1.6s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.35; transform: scale(0.75); }
+        }
+
+        #timer {
+            font-size: 14px;
+            font-weight: 700;
+            color: #d6fff0;
+            background: rgba(0, 255, 157, 0.08);
+            border: 1px solid rgba(0, 255, 157, 0.35);
+            box-shadow: 0 0 12px rgba(0, 255, 157, 0.22), inset 0 0 8px rgba(0, 255, 157, 0.06);
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* последние 3 секунды — мигание фиолетовым */
+        #timer.urgent {
+            color: #e5c6ff;
+            background: rgba(185, 107, 255, 0.20);
+            border-color: rgba(185, 107, 255, 0.75);
+            animation: timerBlink 0.55s ease-in-out infinite;
+        }
+
+        @keyframes timerBlink {
+            0%, 100% { opacity: 1; box-shadow: 0 0 18px rgba(185, 107, 255, 0.75), inset 0 0 10px rgba(185, 107, 255, 0.25); }
+            50%      { opacity: 0.30; box-shadow: 0 0 4px rgba(185, 107, 255, 0.25); }
+        }
+
+        #title {
+            font-size: 24px;
+            font-weight: 800;
+            line-height: 1.25;
+            margin: 2px 0 12px;
+            background: linear-gradient(92deg, #8fffd9 0%, #ffffff 45%, #d9aaff 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            filter: drop-shadow(0 0 14px rgba(0, 255, 157, 0.22)) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.65));
+            text-align: center;
+        }
+
+        /* ВАЖНО: варианты — максимум 3 в строке, перенос вниз, центровка */
+        #choices {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;      /* последняя строка по центру */
+            align-items: stretch;
+            gap: 10px;
+        }
+
+        .choice {
+            flex: 0 1 calc(33.333% - 7px);   /* 3 в ряду (учитывая gap) */
+            min-width: 150px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 10px 14px 12px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border-top: 3px solid transparent;
+            transition: opacity 0.5s ease, filter 0.5s ease, transform 0.3s ease;
+        }
+
+        .choice .c-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 17px;
+            min-width: 0;
+        }
+
+        .choice .c-name > span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+        }
+
+        .choice .c-name i {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .choice .c-pts {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-dim);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .choice .c-pts strong {
+            font-size: 16px;
+            font-weight: 800;
+            color: #eaf8ff;
+        }
+
+        /* неон: чётные варианты — зелёные, нечётные — фиолетовые */
+        .choice.g0 .c-name i { background: var(--green); box-shadow: 0 0 8px var(--green), 0 0 15px var(--green); }
+        .choice.g1 .c-name i { background: var(--purple); box-shadow: 0 0 8px var(--purple), 0 0 15px var(--purple); }
+
+        .choice.g0 {
+            border-top-color: var(--green);
+            background: linear-gradient(180deg, rgba(0, 255, 157, 0.10), rgba(0, 255, 157, 0.02) 70%);
+            box-shadow: 0 0 16px -4px rgba(0, 255, 157, 0.45), inset 0 0 18px rgba(0, 255, 157, 0.05);
+        }
+        .choice.g1 {
+            border-top-color: var(--purple);
+            background: linear-gradient(180deg, rgba(185, 107, 255, 0.12), rgba(185, 107, 255, 0.02) 70%);
+            box-shadow: 0 0 16px -4px rgba(185, 107, 255, 0.45), inset 0 0 18px rgba(185, 107, 255, 0.06);
+        }
+
+        /* мини-полоса процентов внутри кнопки-варианта */
+        .choice .c-bar {
+            height: 5px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.07);
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        .choice .c-bar i {
+            display: block;
+            height: 100%;
+            width: 0;
+            border-radius: 999px;
+            transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .choice.g0 .c-bar i { background: linear-gradient(90deg, #007a52, var(--green)); box-shadow: 0 0 10px rgba(0, 255, 157, 0.65); }
+        .choice.g1 .c-bar i { background: linear-gradient(90deg, #7a3ad6, var(--purple)); box-shadow: 0 0 10px rgba(185, 107, 255, 0.65); }
+
+        .choice.winner { animation: winPop 0.5s ease; }
+        .choice.winner.g0, .choice.winner.g1 { transform: scale(1.02); }
+        .choice.loser { opacity: 0.38; filter: saturate(0.4); transform: scale(0.985); box-shadow: none; }
+
+        @keyframes winPop {
+            0%   { transform: scale(1); }
+            50%  { transform: scale(1.035); }
+            100% { transform: scale(1); }
+        }
+
+        #banner {
+            margin-top: 10px;
+            text-align: center;
+            font-weight: 800;
+            font-size: 18px;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
+
+        #banner.show { opacity: 1; }
+        #banner.win.win-green  { color: #7dffd0; text-shadow: 0 0 16px rgba(0, 255, 157, 0.75), 0 0 30px rgba(0, 255, 157, 0.40); }
+        #banner.win.win-purple { color: #d5aaff; text-shadow: 0 0 16px rgba(185, 107, 255, 0.80), 0 0 30px rgba(185, 107, 255, 0.45); }
+        #banner.cancel { color: #ffd166; text-shadow: 0 0 12px rgba(255, 209, 102, 0.45); }
+        #banner.error, #banner.lock { color: var(--text-dim); font-weight: 600; font-size: 15px; }
+
+        #err {
+            display: none;
+            position: absolute;
+            left: 12px; bottom: 12px;
+            font-size: 13px;
+            color: #ff8080;
+            background: rgba(0, 0, 0, 0.65);
+            padding: 8px 14px;
+            border-radius: 10px;
+            max-width: 90%;
+            z-index: 10;
+        }
+        #err.show { display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="card">
+        <div id="head">
+            <span id="badge">Опрос</span>
+            <span id="timer"></span>
+        </div>
+
+        <div id="title">—</div>
+
+        <div id="choices"></div>
+
+        <div id="banner"></div>
+    </div>
+
+    <div id="err"></div>
+
+    <script>
+        /* ============================================================
+           Конфиг (имена ключей хранилища ОБЩИЕ с виджетом ставок,
+           поэтому токен достаточно получать один раз)
+           ============================================================ */
+        const DEFAULT_CHANNEL = 'Splicer_IRL';
+        const DEFAULT_POLL_SEC = 3;               // опрос API, когда опрос активен
+        const IDLE_POLL_SEC = 6;                  // опрос API, когда опросов нет
+        const POST_END_POLL_SEC = 3;              // ускоренный опрос после конца опроса
+        const POST_END_WINDOW_SEC = 90;           // длительность окна ускорения
+
+        /* Безопасная обёртка localStorage (file://, OBS и т.п.) */
+        const store = {
+            get(k)    { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+            set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} },
+            del(k)    { try { window.localStorage.removeItem(k); } catch (e) {} },
+        };
+
+        const qs = new URLSearchParams(location.search);
+        let TOKEN = qs.get('token') || store.get('bets_token') || '';
+        let CLIENT_ID = qs.get('client_id') || store.get('bets_client_id') || '';
+        if (qs.get('token')) {
+            store.set('bets_token', qs.get('token'));
+            try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+        }
+        if (qs.get('client_id')) store.set('bets_client_id', qs.get('client_id'));
+
+        const CHANNEL = (qs.get('channel') || DEFAULT_CHANNEL).toLowerCase();
+        const SCALE = Math.min(3, Math.max(0.4, parseFloat(qs.get('scale')) || 1));
+        const AFTERForResultSec = parseFloat(qs.get('after') ?? '60');
+        // по умолчанию самовыключение до следующего опроса; &idle=show — пустая карточка
+        const HIDE_WHEN_IDLE = qs.get('idle') !== 'show';
+        const POLL_SEC = Math.max(2, parseFloat(qs.get('poll')) || DEFAULT_POLL_SEC);
+        const DEMO = qs.get('demo') === '1';
+
+        document.documentElement.style.zoom = SCALE;
+
+        /* ============================================================
+           Элементы
+           ============================================================ */
+        const el = id => document.getElementById(id);
+        const card = el('card'), title = el('title'), timer = el('timer');
+        const badge = el('badge'), choicesBox = el('choices');
+        const banner = el('banner'), errBox = el('err');
+
+        function showErr(msg) {
+            console.error('[opros]', msg);
+            errBox.textContent = String(msg);
+            errBox.classList.add('show');
+        }
+        function hideErr() { errBox.classList.remove('show'); }
+
+        function showBanner(text, cls = '', ms = 0) {
+            banner.className = '';
+            banner.textContent = text;
+            banner.classList.add('show');
+            String(cls).split(/\s+/).filter(Boolean).forEach(c => banner.classList.add(c));
+            if (ms > 0) setTimeout(() => { if (banner.textContent === text) banner.classList.remove('show'); }, ms);
+        }
+
+        /* ============================================================
+           Форматирование
+           ============================================================ */
+        function fmtNum(n) {
+            n = n || 0;
+            if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+            if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+            return String(n);
+        }
+
+        function fmtTime(sec) {
+            sec = Math.max(0, Math.floor(sec));
+            const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+            if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            return m + ':' + String(s).padStart(2, '0');
+        }
+
+        /* ============================================================
+           Helix API — статусные поля такие же, как у виджета ставок
+           ============================================================ */
+        let broadcasterId = store.get('bets_broadcaster_' + CHANNEL) || '';
+
+        async function helix(path, attempt = 1) {
+            if (!TOKEN) throw new Error('Нет токена — смотри stavki/get-token.html');
+            if (!CLIENT_ID) throw new Error('Нет client_id — смотри stavki/get-token.html');
+            const resp = await fetch('https://api.twitch.tv/helix/' + path, {
+                headers: { 'Authorization': 'Bearer ' + TOKEN, 'Client-Id': CLIENT_ID },
+            });
+            if (resp.status === 401) {
+                if (attempt === 1) return helix(path, attempt + 1);
+                store.del('bets_token');
+                TOKEN = '';
+                showBanner('Токен истёк — обнови URL (см. stavki/get-token.html)', 'error');
+                throw new Error('401 Unauthorized — токен недействителен');
+            }
+            if (resp.status === 403) {
+                throw new Error('Нет доступа — нужен скоуп channel:read:polls (пересоздай токен через stavki/get-token.html)');
+            }
+            if (resp.status === 429) throw new Error('Слишком много запросов (429), увеличь &poll=');
+            if (!resp.ok) throw new Error('Helix ' + resp.status);
+            return resp.json();
+        }
+
+        async function resolveBroadcaster() {
+            if (broadcasterId) return broadcasterId;
+            const data = await helix('users?login=' + encodeURIComponent(CHANNEL));
+            if (!data.data || !data.data.length) throw new Error('Канал "' + CHANNEL + '" не найден');
+            broadcasterId = data.data[0].id;
+            store.set('bets_broadcaster_' + CHANNEL, broadcasterId);
+            return broadcasterId;
+        }
+
+        async function fetchPoll() {
+            const bid = await resolveBroadcaster();
+            const data = await helix('polls?broadcaster_id=' + bid);
+            return (data.data && data.data[0]) || null;   // самый свежий опрос
+        }
+
+        /* ============================================================
+           Отрисовка вариантов (обновление на месте — плавные переходы)
+           ============================================================ */
+        const choiceEls = new Map();   // choice_id -> DOM-узел
+
+        function ensureChoiceNode(c, idx) {
+            let node = choiceEls.get(c.id);
+            if (!node) {
+                node = document.createElement('div');
+                node.className = 'choice';
+                node.innerHTML =
+                    '<div class="c-name"><i></i><span>' + '</span></div>' +
+                    '<div class="c-pts"><strong>0</strong><span>(0%)</span></div>' +
+                    '<div class="c-bar"><i></i></div>';
+                choicesBox.appendChild(node);
+                choiceEls.set(c.id, node);
+            }
+            node.classList.remove('g0', 'g1', 'winner', 'loser');
+            node.classList.add(idx % 2 === 0 ? 'g0' : 'g1');   // чередование цветов
+            node.querySelector('.c-name span').textContent = c.title || 'Вариант';
+            return node;
+        }
+
+        function renderPoll(p) {
+            title.textContent = p.title || 'Опрос';
+
+            const choices = p.choices || [];
+            const counts = choices.map(c => c.votes | 0);
+            const total = counts.reduce((a, b) => a + b, 0);
+            const maxVotes = counts.reduce((a, b) => Math.max(a, b), 0);
+
+            badge.textContent = 'Опрос';
+            timer.style.display = '';
+
+            // живые варианты: обновляем узлы, лишние прячем
+            const seen = new Set(choices.map(c => c.id));
+            for (const [id, node] of choiceEls) {
+                if (!seen.has(id)) { node.remove(); choiceEls.delete(id); }
+            }
+
+            choices.forEach((c, idx) => {
+                const node = ensureChoiceNode(c, idx);
+                const share = total > 0 ? (counts[idx] / total) * 100 : 0;
+                node.querySelector('.c-pts strong').textContent = fmtNum(counts[idx]);
+                node.querySelector('.c-pts span').textContent = '(' + Math.round(share) + '%)';
+                node.querySelector('.c-bar i').style.width = share + '%';
+            });
+
+            const status = (p.poll_status || 'ACTIVE').toUpperCase();
+
+            if (status === 'ACTIVE') {
+                badge.textContent = 'Опрос';
+                const startedMs = Date.parse(p.started_at || p.created_at) || Date.now();
+                const windowSec = Math.max(0, ((p.poll_settings || {}).duration_seconds | 0)
+                    || Math.round((Date.parse(p.ends_at || p.ended_at) - startedMs) / 1000)
+                    || 0);
+                const endsMs = Date.parse(p.ends_at) || (startedMs + windowSec * 1000);
+                const windowLabel = windowSec > 0 ? ' из ' + fmtTime(windowSec) : '';
+                const update = () => {
+                    const left = (endsMs - Date.now()) / 1000;
+                    timer.textContent = left > 0
+                        ? 'осталось ' + fmtTime(left) + windowLabel
+                        : 'завершается…';
+                    timer.classList.toggle('urgent', left <= 3 && left > 0);
+                };
+                update();
+                clearInterval(renderTimer);
+                renderTimer = setInterval(update, 1000);
+            } else {
+                timer.style.display = 'none';
+                clearInterval(renderTimer);
+                timer.classList.remove('urgent');
+
+                if (status === 'COMPLETED') {
+                    badge.textContent = 'Результат';
+                    // победители — все с максимальным числом голосов (с учётом ничьих)
+                    const winIdx = choices.map((c, i) => counts[i] === maxVotes && maxVotes > 0 ? i : -1).filter(i => i >= 0);
+                    choices.forEach((c, idx) => {
+                        const node = choiceEls.get(c.id);
+                        if (node) node.classList.add(winIdx.includes(idx) ? 'winner' : 'loser');
+                    });
+                    if (winIdx.length > 0) {
+                        const w = winIdx[0];
+                        const cls = w % 2 === 0 ? 'win win-green' : 'win win-purple';
+                        showBanner('Победа: ' + (choices[w].title || 'Вариант') + ' — ' + fmtNum(counts[w]) + ' голосов' + (winIdx.length > 1 ? ' (ничья)' : ''), cls);
+                        scheduleHide();
+                    }
+                } else if (status === 'TERMINATED') {
+                    badge.textContent = 'Завершён';
+                    choices.forEach(c => { const n = choiceEls.get(c.id); if (n) n.classList.add('loser'); });
+                    showBanner('Опрос завершён досрочно — голоса не учитываются', 'cancel');
+                    scheduleHide(true);
+                } else {
+                    // ARCHIVED / MODERATED и прочее — показываем как завершённый
+                    badge.textContent = status === 'ARCHIVED' ? 'Архив' : 'Статус: ' + status;
+                    showBanner('Опрос недоступен', 'lock');
+                    scheduleHide(true);
+                }
+            }
+        }
+
+        function renderEmpty() {
+            badge.textContent = 'Опросы';
+            timer.style.display = 'none';
+            clearInterval(renderTimer);
+            title.textContent = '';
+            showBanner('Нет активного опроса', 'lock');
+        }
+
+        let resultTimer = null;
+        function scheduleHide(cap = 0) {
+            if (AFTERForResultSec <= 0 || DEMO) return;
+            const sec = cap > 0 ? Math.min(AFTERForResultSec, cap) : AFTERForResultSec;
+            clearTimeout(resultTimer);
+            resultTimer = setTimeout(() => { setVisibility(false); }, sec * 1000);
+        }
+
+        /* ============================================================
+           Видимость
+           ============================================================ */
+        function setVisibility(visible) {
+            card.classList.toggle('visible', visible);
+            card.classList.toggle('hidden', !visible);
+        }
+        function idleHideNow() {
+            clearInterval(renderTimer);
+            clearTimeout(resultTimer);
+            banner.className = '';
+            banner.textContent = '';
+            setVisibility(false);
+        }
+
+        /* ============================================================
+           Основной цикл (как у ставок: активный опрос 3с, после
+           завершения окно ускоренного опроса 90с, иначе 6с)
+           ============================================================ */
+        let lastRenderedKey = null;
+        let burstUntil = 0;
+        let renderTimer = null;
+
+        async function tick() {
+            try {
+                hideErr();
+                const p = await fetchPoll();
+                const status = p ? (p.poll_status || '').toUpperCase() : '';
+                const isActive = status === 'ACTIVE';
+                const renderKey = p ? (p.id + ':' + status) : null;
+
+                if (!p || status === 'ARCHIVED' || status === 'MODERATED') {
+                    // опроса нет вообще (или недоступен) — полный простой (самовыключение)
+                    if (HIDE_WHEN_IDLE) idleHideNow();
+                    else { renderEmpty(); setVisibility(true); }
+                    idlePollNext(Date.now() < burstUntil ? POST_END_POLL_SEC : IDLE_POLL_SEC);
+                    return;
+                }
+
+                if ((status === 'COMPLETED' || status === 'TERMINATED') && renderKey !== lastRenderedKey) {
+                    burstUntil = Date.now() + POST_END_WINDOW_SEC * 1000;
+                }
+
+                if (isActive || renderKey !== lastRenderedKey) {
+                    renderPoll(p);
+                    setVisibility(true);
+                    lastRenderedKey = renderKey;
+                    idlePollNext(status === 'ACTIVE' ? POLL_SEC : POST_END_POLL_SEC);
+                    return;
+                }
+
+                idlePollNext(isActive ? POLL_SEC : (Date.now() < burstUntil ? POST_END_POLL_SEC : IDLE_POLL_SEC));
+            } catch (e) {
+                showErr(e.message + ' — повтор через 30 сек');
+                idlePollNext(30);
+            }
+        }
+
+        function idlePollNext(sec) { setTimeout(tick, sec * 1000); }
+
+        /* ============================================================
+           ДЕМО-режим (&demo=1): фальшивый опрос на 5 вариантов,
+           чтобы проверить перенос 3+2. Цикл 36 сек:
+             0-18   активен (голоса растут, таймер "из 0:18")
+             18-30  результат (победитель чередуется)
+             30-36  опроса нет — самовыключение
+           ============================================================ */
+        const DEMO_START = Date.now();
+        let demoIdle = false;
+
+        function demoTick() {
+            hideErr();
+            demoIdle = false;
+            const t = (Date.now() - DEMO_START) / 1000;
+            const cycle = Math.floor(t / 36);
+            const ph = t % 36;
+            const names = ['Вареники', 'Пельмени', 'Пицца', 'Суши', 'Шаурма'];
+
+            const p = {
+                id: 'demo-' + cycle,
+                title: 'Что заказываем на стриме?',
+                poll_status: 'ACTIVE',
+                poll_settings: { duration_seconds: 18 },
+                started_at: new Date(Date.now() - ph * 1000).toISOString(),
+                choices: names.map((n, i) => ({ id: 'demo-c' + i, title: n, votes: 0 })),
+            };
+            p.choices.forEach((c, i) => {
+                const g = Math.min(ph, 18);              // после конца опроса голоса заморожены
+                c.votes = Math.floor(200 + g * (30 + i * 10) + (i === cycle % 5 ? 1500 : 0));
+            });
+
+            if (ph < 18) {
+                p.poll_status = 'ACTIVE';
+            } else if (ph < 30) {
+                p.poll_status = 'COMPLETED';
+            } else {
+                demoIdle = true;
+            }
+
+            if (demoIdle) {
+                idleHideNow();
+                return;
+            }
+            renderPoll(p);
+            setVisibility(true);
+        }
+
+        /* ============================================================
+           Старт
+           ============================================================ */
+        if (DEMO) {
+            demoTick();
+            setInterval(demoTick, 1000);
+        } else {
+            tick();
+        }
+    </script>
+</body>
+</html>
